@@ -19,6 +19,7 @@ return new class extends Migration
             $table->string('member_id', 255)->nullable();
             $table->string('status', 255)->nullable();
             $table->string('date', 255)->nullable();
+            $table->string('sender_id', 255)->nullable();
             $table->timestamps();
         });
     }

@@ -19,7 +19,8 @@ return new class extends Migration
             $table->string('member_id', 255)->nullable();
             $table->string('mouse_click', 255)->nullable();
             $table->string('keyboard_click', 255)->nullable();
-            $table->string('screenshot', 255)->nullable();
+            
+            $table->longText('screenshot')->nullable();
             $table->string('software_use_name', 255)->nullable();
             
             $table->string('durations', 255)->nullable();
