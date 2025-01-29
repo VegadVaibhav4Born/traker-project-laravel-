@@ -38,7 +38,8 @@ class project_detailcontroller extends Controller
                 $totalKeyboardHits = 0;
                 $totalDuration = 0;
                 // Loop through each member ID
-
+$totalprojectduration = 0;
+$totalProjectDurationInSeconds = 0;
                 foreach ($memberIds as $memberId) {
                     
                     // Fetch mouse clicks for the current member and project
@@ -52,13 +53,19 @@ class project_detailcontroller extends Controller
                                                ->where('project_id', $project_id) // Make sure to use $id or $project_id as needed
                                                ->sum('keyboard_click');
                     $totalKeyboardHits += $keyboardClicks;
-                    //  $startTime = Activity::where('member_id', $memberId)
-                    //     ->where('project_id', $id)
-                    //     ->sum('start_time'); // Assuming 'duration' is a field in Activity
+                    $projectDurations = Activity::where('member_id', $memberId)
+                            ->where('project_id', $project_id)
+                            ->pluck('durations');
+
+                    foreach ($projectDurations as $duration) {
+                        list($hours, $minutes, $seconds) = explode(':', $duration);
+                        $totalProjectDurationInSeconds += $hours * 3600 + $minutes * 60 + $seconds;
+                    }
                     
-                    //  $endTime = Activity::where('member_id', $memberId)
-                    //     ->where('project_id', $id)
-                    //     ->sum('end_time');
+                    // Convert total duration in seconds back to HH:MM:SS format
+                    $totalprojectduration = gmdate('H:i:s', $totalProjectDurationInSeconds);
+
+                    
                     $activities = Activity::where('member_id', $memberId)
                           ->where('project_id', $project_id)
                           ->get();
@@ -78,32 +85,29 @@ class project_detailcontroller extends Controller
                       
                  // Assuming $memberId and $project are defined and available in this context
 
-    // Fetch the user based on the memberId
-    $member = User::where('id', $memberId)->first();
-    // $usersData = [];
-        if ($member) {
-            // Decode the project's status field, defaulting to an empty array if decoding fails
-            $statusMap = json_decode($project->status, true) ?? [];
-           
-            
-        // Prepare the data for the user
-
-       
-        } 
-        $usersData[] = [
-            'users' => $member , // Store the user object
-            'mouseClicks' => $mouseClicks ?? '', // Number of mouse clicks
-            'keyboardClicks' => $keyboardClicks ?? '', // Number of keyboard clicks
-            'image' => $member->profile_image ?? '', // User's profile image
-            'id' => $member->id ?? '', // User's ID
-            // 'user' => $user_h , // Storing the user object again seems redundant, consider removing this line if not needed
-            'memberStatuses' => $statusMap[$memberId] ?? 'unknown', // Retrieve the status for this member or 'unknown' if not found
-            'totalDuration' => formatDurationInSeconds($duration) // Format the duration in seconds
-        ];
-       
-
-                
-                
+                // Fetch the user based on the memberId
+                $member = User::where('id', $memberId)->first();
+                // $usersData = [];
+                    if ($member) {
+                        // Decode the project's status field, defaulting to an empty array if decoding fails
+                        $statusMap = json_decode($project->status, true) ?? [];
+                   
+                    
+                // Prepare the data for the user
+        
+               
+                     } 
+                    $usersData[] = [
+                        'users' => $member , // Store the user object
+                        'mouseClicks' => $mouseClicks ?? '', // Number of mouse clicks
+                        'keyboardClicks' => $keyboardClicks ?? '', // Number of keyboard clicks
+                        'image' => $member->profile_image ?? '', // User's profile image
+                        'id' => $member->id ?? '', // User's ID
+                        // 'user' => $user_h , // Storing the user object again seems redundant, consider removing this line if not needed
+                        'memberStatuses' => $statusMap[$memberId] ?? 'unknown', // Retrieve the status for this member or 'unknown' if not found
+                        'totalDuration' => formatDurationInSeconds($duration) // Format the duration in seconds
+                    ];
+      
         
                 }
              
@@ -116,15 +120,22 @@ class project_detailcontroller extends Controller
                     $teamMembers = User::whereIn('id', $teamMemberIds)->get();
                 
                 }
-      if ($users_data) {
-                 if ($users_data instanceof \Illuminate\Http\RedirectResponse) {
-                return $users_data; // Return the redirect response
-                }
-      }
-            return view('frontend.project-details',['project'=>$project,'totalMouseClicks'=>$totalMouseClicks,
-            'totalKeyboardHits'=>$totalKeyboardHits,'user'=>$user_h,'usersData'=>$usersData,
+                  if ($users_data) {
+                             if ($users_data instanceof \Illuminate\Http\RedirectResponse) {
+                            return $users_data; // Return the redirect response
+                            }
+                  }
+                  
+            return view('frontend.project-details',
+            ['project'=>$project,
+            'totalMouseClicks'=>$totalMouseClicks,
+            'totalKeyboardHits'=>$totalKeyboardHits,
+            'user'=>$users_data['user'],
+            'usersData'=>$usersData,
             'request_projects' => $users_data['request_projects'] ?? [],
-                   'projectCount' => $users_data['projectCount'] ?? 0,
+           'projectCount' => $users_data['projectCount'] ?? 0,
+           'totalprojectduration'=>$totalprojectduration,
+           'type' => $users_data['type'] ?? [],
             ]);
         } else {
             return redirect()->route('otp-verify')->with('error', 'Please First OTP verify.');

@@ -30,7 +30,8 @@ class UserProfileController extends Controller
 
                 // Pass the user data and countries to the view
                 return view('frontend.user-profile', ['user' => $user, 'countries' => $countries,'request_projects' => $users_data['request_projects'] ?? [],
-                   'projectCount' => $users_data['projectCount'] ?? 0,]);
+                   'projectCount' => $users_data['projectCount'] ?? 0,
+                   'type' => $users_data['type'] ?? [],]);
                 // return redirect()->route('user-profile')->with(['user' => $user, 'countries' => $countries]);
             } else {
                 // Display an alert and redirect to the login page

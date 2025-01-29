@@ -24,16 +24,37 @@ class LoginController extends Controller
     {
         $email = $request->input('email');
         $password = $request->input('password');
+        $remember = $request->has('remember'); // Check if 'Remember Me' is checked
 
         // Validate the email and password
         $selectuser = User::where('email', $email)->first();
         
         if ($selectuser && $selectuser->password === $password) {
             // Storing user details in session
+            
+           if ($remember) {
+            // Create a session with expiration set to 2 minutes
             $request->session()->put('username', $selectuser->name);
             $request->session()->put('email', $selectuser->email);
             $request->session()->put('type', $selectuser->type);
-            
+        } else {
+            // Store session data without expiration
+                        // $expiration = now()->addDays(30);
+                        $expiration = now()->addHours(24);
+
+            $request->session()->put('username', [
+                'value' => $selectuser->name,
+                'expires_at' => $expiration->timestamp
+            ]);
+
+            $request->session()->put('email', [
+                'value' => $selectuser->email,
+                'expires_at' => $expiration->timestamp
+            ]);
+
+           $request->session()->put('type', $selectuser->type);
+        }
+
             if ($selectuser->status_type === 'complete') {
                 // Redirect to index if status_type is complete
                 return redirect("index");

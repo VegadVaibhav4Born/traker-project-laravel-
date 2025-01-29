@@ -18,7 +18,7 @@ class Activity extends Model
         'keyboard_click',
         'screenshot',
         'software_use_name',
-        
+        'start_time',
         'end_time',
         'durations',
     ];

@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\project;
 use App\Models\User;
+use App\Models\notification;
 use Illuminate\Support\Facades\Mail;
 class projectcontroller extends Controller
 {
@@ -13,7 +14,7 @@ class projectcontroller extends Controller
     public function index(Request $request)
     {
          $headerController = new headerController();
-    $users_data = $headerController->header($request);
+        $users_data = $headerController->header($request);
      
         $email = $request->session()->get('email');
         $type = $request->session()->get('type');
@@ -27,35 +28,55 @@ class projectcontroller extends Controller
                 
              // Retrieve projects by email
             $project = Project::where('email', $email)->orwhereRaw('FIND_IN_SET(?, member_id)', [$user->id])
-            ->whereRaw('JSON_EXTRACT(status, CONCAT("$.", ?)) = "accepted"', [$user->id])->get();
+            ->whereRaw('JSON_EXTRACT(status, CONCAT("$.", ?)) = "accepted"', [$user->id])->orderBy('id', 'DESC')->get();
+            // $project = Project::where('email', $email)
+            //     ->orWhereRaw('FIND_IN_SET(?, member_id)', [$user->id])
+            //     ->whereRaw("JSON_UNQUOTE(JSON_EXTRACT(status, '$.\"{$user->id}\"')) = 'accepted'")
+            //     ->orderBy('id', 'DESC')
+            //     ->get();
 
             // Retrieve projects by member_id
             // $requests = Project::where('member_id', 'LIKE', "%,$user->id,%")->get();
             $requests = Project::whereRaw('FIND_IN_SET(?, member_id)', [$user->id])
             ->whereRaw('JSON_EXTRACT(status, CONCAT("$.", ?)) = "pending"', [$user->id])
-            ->get();
-// Initialize an empty array for request projects
-$projectsrequest = [];
+            ->orwhereRaw('JSON_EXTRACT(status, CONCAT("$.", ?)) = "Deactivated"', [$user->id])
+            ->orderBy('id', 'desc')->get();
+            //         $requests = Project::whereRaw('FIND_IN_SET(?, member_id)', [$user->id])
+            // ->whereRaw('JSON_UNQUOTE(JSON_EXTRACT(status, ?)) = ?', ['$.'.$user->id, 'pending'])
+            // ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(status, ?)) = ?', ['$.'.$user->id, 'Deactivated'])
+            // ->orderBy('id', 'desc')
+            // ->get();
 
-// Populate the request_projects array with project details
+        // Initialize an empty array for request projects
+        $projectsrequest = [];
+        
+        // Populate the request_projects array with project details
+        
+        foreach ($requests as $request) {
+              $statusData = json_decode($request->status, true);
 
-foreach ($requests as $request) {
-    $projectsrequest[] = [
+    // Get the status for the current member
+    $status = isset($statusData[$user->id]) ? $statusData[$user->id] : 'unknown';
+
+        $projectsrequest[] = [
         'project' => $request,
+        'id'=>$request->id,
         'project_id' => $request->project_id,         
         'project_name' => $request->project_name,     
         'project_logo' => $request->project_logo,     
         'member_id' => $request->member_id,
         'price' => $request->project_price, 
+         'status' => $status,
         'acceptUrl' => route('projects.accept', ['projectId' => $request->id, 'userId' => $user->id]),
         'rejectUrl' => route('projects.reject', ['projectId' => $request->id, 'userId' => $user->id]),
-    ];
-}
-$request_projects = $users_data['request_projects'] ?? [];
-$projectCount = $users_data['projectCount'] ?? 0;
-$project_request = $projectsrequest;
-// Prepare data for view
-$data = compact('project', 'user', 'request_projects','request_projects','projectCount','project_request');
+            ];
+        }
+        $request_projects = $users_data['request_projects'] ?? [];
+        $projectCount = $users_data['projectCount'] ?? 0;
+        $project_request = $projectsrequest;
+        $type = $users_data['type'] ?? [];
+        // Prepare data for view
+        $data = compact('project', 'user', 'request_projects','request_projects','projectCount','project_request','type');
 
 
                     //  return view('frontend.projects', ['email' => $email]);
@@ -105,13 +126,15 @@ $data = compact('project', 'user', 'request_projects','request_projects','projec
         // Fetch team members based on member IDs
         $teamMemberIds = explode(',', $project->member_id);
         $teamMembers = User::whereIn('id', $teamMemberIds)->get();
+        $memberStatuses = json_decode($project->status, true);
 
         $title = "Update Project";
         $url = url('project/update/') . "/" . $id;
         
              $request_projects = $users_data['request_projects'] ?? [];
             $projectCount = $users_data['projectCount'] ?? 0;
-            $data = compact('project', 'url', 'title', 'user', 'teamMembers','request_projects','projectCount');
+            $type = $users_data['type'] ?? [];
+            $data = compact('project', 'url', 'title', 'user', 'teamMembers','request_projects','projectCount','memberStatuses','type');
     }
      
 
@@ -253,12 +276,135 @@ public function update($id, Request $request)
         $name = $team_member['name'];
         $email = $team_member['email'];
         $userId = User::where('email', $email)->first()->id;
-
+ 
         $this->sendMemberEmail($project->id, $userId, $name, $email);
     }
     session()->flash('success', 'Project updated successfully!');
     return redirect('projects');
 }
+public function deactivateMember(Request $request)
+{
+    $project = Project::find($request->input('project_id'));
+
+    if (!$project) {
+        return response()->json(['success' => false, 'message' => 'Project not found.']);
+    }
+
+    // Get the current status and member IDs
+    $currentStatus = json_decode($project->status, true);
+    $memberIds = explode(',', $project->member_id);
+    $email = $request->input('email');
+    $user = User::where('email', $email)->first();
+
+    if ($user) {
+        $userId = $user->id;
+
+        // Ensure the member ID is in the member_id field
+        if (!in_array($userId, $memberIds)) {
+            return response()->json(['success' => false, 'message' => 'Member ID not found in the project.']);
+        }
+
+        // Update the member's status
+        if (isset($currentStatus[$userId])) {
+            
+                $notification = new notification;
+                $notification->project_id =$project->project_id;
+                $notification->date = now()->format('Y-m-d');
+               
+                 $notification->status = "unread" ;
+                 $notification->member_id = $userId ; 
+                 $notification->save();
+         
+            $currentStatus[$userId] = 'Deactivated';
+            $project->status = json_encode($currentStatus);
+            $project->save();
+            return response()->json(['success' => true]);
+        } else {
+            return response()->json(['success' => false, 'message' => 'Member status not found.']);
+        }
+    } else {
+        return response()->json(['success' => false, 'message' => 'Member not found.']);
+    }
+}
+
+
+
+// public function update($id, Request $request)
+// {
+//     // Retrieve the existing project
+//     $project = Project::find($id);
+//     if (!$project) {
+//         session()->flash('error', 'Project Not Found!');
+//         return redirect()->back();
+//     }
+
+//     $memberIds = explode(',', $project->member_id); // Get existing member IDs as an array
+//     $currentStatus = json_decode($project->status, true) ?? []; // Get current statuses
+    
+//     $errors = [];
+
+//     // Loop through the submitted team members
+//     foreach ($request->team_members as $index => $team_member) {
+//         $existingUser = User::where('email', $team_member['email'])->first();
+
+//         if ($existingUser) {
+//             $userId = $existingUser->id;
+
+//             // Add the user ID to the member IDs array if not already present
+//             if (!in_array($userId, $memberIds)) {
+//                 $memberIds[] = $userId;
+//             }
+
+//             // Update the status in the currentStatus array
+//             $status = $team_member['status'] ?? $currentStatus[$userId] ?? 'pending'; // Default to 'pending' if not set
+//             $currentStatus[$userId] = $status;
+//         } else {
+//             // Collect error for invalid emails
+//             $errors["team_members.$index.email"] = 'Email does not exist in the database';
+//         }
+//     }
+
+//     // If there are validation errors, redirect back with errors
+//     if (!empty($errors)) {
+//         return redirect()->back()->withErrors($errors)->withInput();
+//     }
+
+//     // Update project details
+//     $project->email = $request->input('user_email');
+//     $project->project_name = $request->input('project_name');
+//     $project->project_currency = $request->input('currency');
+//     $project->project_price = $request->input('price');
+//     $project->start_date = $request->input('start_date');
+
+//     // Save the member IDs and statuses
+//     $project->status = json_encode($currentStatus); // Update status JSON
+//     $project->member_id = implode(',', $memberIds); // Update member IDs as a comma-separated string
+
+//     // Handle image upload if present
+//     if ($request->hasFile('image')) {
+//         $image = $request->file('image');
+//         $destinationPath = public_path('images/project images');
+//         $imageName = time() . '-' . $image->getClientOriginalName();
+//         $image->move($destinationPath, $imageName);
+        
+//         $project->project_logo = 'project images/' . $imageName;
+//     }
+
+//     // Save the updated project
+//     $project->save();
+
+//     // Send emails to team members
+//     foreach ($request->team_members as $team_member) {
+//         $name = $team_member['name'];
+//         $email = $team_member['email'];
+//         $userId = User::where('email', $email)->first()->id;
+
+//         $this->sendMemberEmail($project->id, $userId, $name, $email);
+//     }
+
+//     session()->flash('success', 'Project updated successfully!');
+//     return redirect('projects');
+// }
 
 protected function sendMemberEmail($projectId, $userId, $name, $email)
 {

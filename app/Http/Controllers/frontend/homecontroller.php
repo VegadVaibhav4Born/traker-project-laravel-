@@ -62,6 +62,7 @@ class HomeController extends Controller
             $dataForChart3 = Activity::where('member_id', $userId)
                 ->whereBetween('start_time', [$startDate, $endDate])
                 ->get();
+                
                
                 $duration = 0;
                 $totalMouseClicks = 0;
@@ -143,10 +144,21 @@ class HomeController extends Controller
             } elseif ($percentageDifference < -100) {
                 $percentageDifference = -100;
             }
+             if ($percentageDifference = 100) {
+                $percentageDifference = 00;
+            }
             if ($percentageDifferenceDuraion > 100) {
                 $percentageDifferenceDuraion = 100;
             } elseif ($percentageDifferenceDuraion < -100) {
                 $percentageDifferenceDuraion = -100;
+            }
+               if ($previousDuration == 0 && $totalMouseClicks > 0) {
+                $percentageDifference = 100;
+            }
+
+            // Check if there are no records for both periods
+            if ($previousDuration == 0 && $duration == 0) {
+                $percentageDifference = 0;
             }
             $durationDifference = $previousDuration - $duration;
             $differenceIndicator = $durationDifference >= 0 ? '-' : '+';
@@ -262,29 +274,34 @@ class HomeController extends Controller
         ]
     ];
 
-            $chartData3 = [
-                'series' => [
-                    [
-                        'name' => 'Mouse Clicks',
-                        'type' => 'bar',
-                        'data' => $dataForChart3->map(function($activity) {
-                            return $activity->mouse_click;
-                        })->toArray()
-                    ],
-                    [
-                        'name' => 'Duration',
-                        'type' => 'bar',
-                        'data' => $dataForChart3->map(function($activity) {
-                            return $activity->keyboard_click;
-                        })->toArray()
-                    ]
-                ],
-                'xaxis' => [
-                    'categories' => $dataForChart3->map(function($activity) {
-                        return Carbon::parse($activity->start_time)->format('Y-m-d');
-                    })->toArray()
-                ]
-            ];
+
+ $aggregatedDataForChart3 = $dataForChart3->groupBy(function($activity) {
+        return Carbon::parse($activity->start_time)->format('Y-m-d'); // Group by date
+    })->map(function($group) {
+        return [
+            'mouse_clicks' => $group->sum('mouse_click'),
+            'keyboard_clicks' => $group->sum('keyboard_click'),
+        ];
+    });
+
+
+              $chartData3 = [
+        'series' => [
+            [
+                'name' => 'Mouse Clicks',
+                'type' => 'bar',
+                'data' => $aggregatedDataForChart3->pluck('mouse_clicks')->toArray()
+            ],
+            [
+                'name' => 'Keyboard Clicks',
+                'type' => 'bar',
+                'data' => $aggregatedDataForChart3->pluck('keyboard_clicks')->toArray()
+            ]
+        ],
+        'xaxis' => [
+            'categories' => $aggregatedDataForChart3->keys()->toArray()
+        ]
+    ];
 
 
 
@@ -332,8 +349,9 @@ class HomeController extends Controller
                  'chartDataSoftwareUsage' => $chartDataSoftwareUsage,
                  'softwareUsageData' =>$softwareUsageData,
                  'softwarePercentageData' => $softwarePercentageData,
-                  'request_projects' => $users_data['request_projects'] ?? [],
-                   'projectCount' => $users_data['projectCount'] ?? 0
+                 'request_projects' => $users_data['request_projects'] ?? [],
+                 'projectCount' => $users_data['projectCount'] ?? 0,
+                 'type' => $users_data['type'] ?? [],
                 
             ]);
        } else {
@@ -344,9 +362,14 @@ class HomeController extends Controller
     }  
 }
 
-public function DateRange(Request $request)
-{
-    // Reuse the logic from the index method, handle date range here
-    return $this->index($request);
-}
+   public function DateRange(Request $request)
+    {
+        // Reuse the logic from the index method for date range filtering
+        return $this->index($request);
+    }
+
+    public function DateRangeSelect(Request $request)
+    {
+        return redirect()->route('home');
+    }
 }

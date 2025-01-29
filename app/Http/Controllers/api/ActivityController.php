@@ -17,20 +17,19 @@ class ActivityController extends Controller
     }
     public function store(Request $request)
     {
+        $start_time = $request->start_time;
+        $end = Carbon::now();  // Set end_time to the current time
         
-        $end_time = $request->end_time;
-        $start = Carbon::now();
-        $end = Carbon::parse($end_time);
-        // $duration = $end->diffInSeconds($start);
-       $durationInSeconds = $end->diffInSeconds($start);
+        $start = Carbon::parse($start_time);
+        $durationInSeconds = $end->diffInSeconds($start);
 
-// Convert duration to hours, minutes, and seconds
-$hours = floor($durationInSeconds / 3600);
-$minutes = floor(($durationInSeconds % 3600) / 60);
-$seconds = $durationInSeconds % 60;
-
-// Format duration as HH:MM:SS
-$formattedDuration = sprintf('%02d:%02d:%02d', $hours, $minutes, $seconds);
+        // Convert duration to hours, minutes, and seconds
+        $hours = floor($durationInSeconds / 3600);
+        $minutes = floor(($durationInSeconds % 3600) / 60);
+        $seconds = $durationInSeconds % 60;
+        
+        // Format duration as HH:MM:SS
+        $formattedDuration = sprintf('%02d:%02d:%02d', $hours, $minutes, $seconds);
         
         $data = [
             'title' => $request-> title ,
@@ -42,7 +41,7 @@ $formattedDuration = sprintf('%02d:%02d:%02d', $hours, $minutes, $seconds);
             'software_use_name' => $request->  software_use_name,
             'software_use_time' => $request-> software_use_time ,
             'start_time' => $request->  start_time,
-            'end_time' => $request->  end_time,
+            'end_time' => $end,
             'durations' => $formattedDuration,
             ];
             

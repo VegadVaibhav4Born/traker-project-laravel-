@@ -28,6 +28,7 @@ class project_overviewscontroller extends Controller
               'request_projects' => $users_data['request_projects'] ?? [],
                    'projectCount' => $users_data['projectCount'] ?? 0,
                 'user'=>$user,
+                'type' => $users_data['type'] ?? [],
             ]);
             } else {
                 return redirect()->route('otp-verify')->with('error', 'Please First OTP verify.');

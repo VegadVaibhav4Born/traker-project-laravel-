@@ -21,34 +21,65 @@ class headerController extends Controller
                         ->first();
              
             if ($user) {
-                // Fetch the user's project requests
-                // $requests = project::whereRaw('FIND_IN_SET(?, member_id)', [$user->id])
-                //                   ->whereRaw('JSON_EXTRACT(status, CONCAT("$.", ?)) = "pending"', [$user->id])
-                //                   ->get();
-                
+            
                 $requests = notification::where('member_id', $user->id)
-                        ->get();
+                        ->orderBy('id', 'DESC')->get();
                 $unread_project = notification::where('member_id', $user->id)->where('status','unread')->get();
-                                
                 // Initialize an array to hold project details
                 $request_projects = [];
                
                 foreach ($requests as $request) {
                      
-                      $project = project::where('project_id', $request->project_id)->first();
+                    $project = project::where('project_id', $request->project_id)->orderBy('id', 'DESC')
+                     ->first();
+   
+    
+                    //  $project = Project::where('project_id', $request->project_id)
+                    // ->where(function ($query) use ($user) {
+                    //     $query->whereRaw('JSON_EXTRACT(status, CONCAT("$.", ?)) = "pending"', [$user->id])
+                    //           ->orWhereRaw('JSON_EXTRACT(status, CONCAT("$.", ?)) = "Deactivated"', [$user->id]);
+                    // })
+                    // ->orderBy('id', 'desc')
+                    // ->first(); 
+            
+           $sender_id = $request->sender_id; // Assuming $sender_id is passed in the request
+$sender = User::find($sender_id); // Get the sender user
 
-                    $emailP = $project->email;
-                    $createdby = User::where('email',$emailP)->first();
-                    $request_projects[] = [
+$desiredStatuses = ['accepted', 'rejected']; // Array of statuses
+
+$Client_project = Project::where('project_id', $request->project_id)
+    ->where('email', $user->email)
+    ->where(function ($query) use ($sender_id, $desiredStatuses) {
+        foreach ($desiredStatuses as $status) {
+            $query->orWhereJsonContains("status->{$sender_id}", $status);
+        }
+    })
+    ->first();
+                    
+            // Provide default values if $project is null
+                    $statusJson = $project ? $project->status : '{}';
+                    $statusArray = json_decode($statusJson, true) ?: [];
+                    $userId = $user->id;
+                    $userStatus = isset($statusArray[$userId]) ? $statusArray[$userId] : 'unknown';
+                    $memberStatus = isset($statusArray[$sender_id]) ? $statusArray[$sender_id] : 'unknown';
+                        $emailP = $project->email;
+                        $createdby = User::where('email',$emailP)->first();
+                        $request_projects[] = [
                         'project' => $project,
+                        'client_project'=>$Client_project,
+                        'member_name' => $sender ? $sender->name : 'unknown', // Ensure $sender is not null
+    'member_status' => $memberStatus,
                         'id'=>$request->id,
                         'project_id' => $request->project_id,
                         'project_name' => $project->project_name,
                         'project_logo' => $project->project_logo,
                         'asign_project'=>$createdby->name,
                         'date'=>$request->date,
+                        'user_status' => $userStatus,
+                        
                     ];
                 }
+                
                 $unread_request = [];
                foreach ($unread_project as $unreadrequest) 
                    {
@@ -56,11 +87,13 @@ class headerController extends Controller
                            ];
                        
                    }
-                
+              
                 // Return data in a structured format
                 return [
                     'request_projects' => $request_projects,
-                    'projectCount' => count($unread_request)
+                    'projectCount' => count($unread_request),
+                    'type'=>$type,
+                    'user'=>$user
                 ];
             }
             

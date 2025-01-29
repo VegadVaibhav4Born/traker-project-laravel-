@@ -31,7 +31,8 @@ class add_projectcontroller extends Controller
                         $title = "Add Project";
                          $request_projects = $users_data['request_projects'] ?? [];
                          $projectCount = $users_data['projectCount'] ?? 0;
-                        $data = compact('user', 'url', 'title', 'project', 'teamMembers','user','request_projects','projectCount');
+                         $type = $users_data['type'] ?? [];
+                        $data = compact('user', 'url', 'title', 'project', 'teamMembers','user','request_projects','projectCount','type');
                         
                         return view('frontend.add-project')->with($data);
                     } else {
@@ -88,6 +89,8 @@ $name = $user->name;
     }
     $p_id=rand(1000, 9999);
     // Save the project
+    $allMemberIds = array_merge($memberIds, [$user->id]);
+    
     $project = new Project;
   
     $project->project_id = "$p_id";
@@ -101,8 +104,15 @@ $name = $user->name;
     $project->end_date = $request->input('end_date');
     $project->project_status = "Pendding";
     // Save member IDs as a comma-separated string
-    $project->status = json_encode(array_fill_keys($memberIds, 'pending'));
-    $project->member_id = implode(',',$memberIds); 
+    // $project->status = json_encode(array_fill_keys($memberIds, 'pending'));
+    $statusArray = array_fill_keys($memberIds, 'pending');
+
+// Add the current user's ID with the status 'accepted'
+$statusArray[$user->id] = 'accepted';
+
+// Encode the status array as JSON
+$project->status = json_encode($statusArray);
+    $project->member_id = implode(',',$allMemberIds); 
     
     foreach($memberIds as $member)
     {
@@ -162,6 +172,20 @@ foreach ($request->team_members as $team_member) {
             $project->project_status = "On Work";
 
             $project->save();
+            
+              $created= User::where('email',$project->email)->first();
+              $userIDCreatedBY = $created->id;
+              
+                $notification = new notification;
+                $notification->project_id =$project->project_id;
+                $notification->sender_id =$userId;
+                $notification->date = now()->format('Y-m-d');
+               
+                 $notification->status = "unread" ;
+                 $notification->member_id = $userIDCreatedBY ; 
+                 $notification->save();
+         
+            
 
         return redirect()->route('projectrequest', [
     'project' => $project,
@@ -187,6 +211,20 @@ foreach ($request->team_members as $team_member) {
             $status[$userId] = 'rejected';
             $project->status = json_encode($status);
             $project->save();
+            
+             $created= User::where('email',$project->email)->first();
+              $userIDCreatedBY = $created->id;
+              
+                $notification = new notification;
+                $notification->project_id =$project->project_id;
+                $notification->sender_id =$userId;
+                $notification->date = now()->format('Y-m-d');
+               
+                 $notification->status = "unread" ;
+                 $notification->member_id = $userIDCreatedBY ; 
+                 $notification->save();
+            
+            
  $userStatus = $userId && isset($status[$userId]) ? $status[$userId] : 'No status available';
 
             // return redirect('/projects')->with('success', 'You have rejected the project invitation.');

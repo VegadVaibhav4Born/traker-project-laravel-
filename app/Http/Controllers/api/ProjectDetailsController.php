@@ -199,9 +199,11 @@ public function show($id)
             $creatorEmail = $project->email;
             $creator = User::where('email', $creatorEmail)->first();
             $creatorName = $creator ? $creator->name : 'Unknown';
-            $projectCreatorMap[$project->project_id] = [
+            $projectCreatorMap[] = [
                 'project_name' => $project->project_name,
                 'created_by' => $creatorName,
+                'Project_Id'=>$project->project_id,
+                'project_image'=> 'https://test.4born.in/images/'.$project->project_logo,
             ];
         }
 

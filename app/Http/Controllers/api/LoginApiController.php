@@ -39,7 +39,9 @@ class LoginApiController extends Controller
                             'country'=>$user->country,
                             'status_type'=>$user->status_type,
                             'address'=>$user->address,
-                            'mobile'=>$user->mobile
+                            'mobile'=>$user->mobile,
+                            'Profile Image'=> 'https://test.4born.in/'.$user->profile_image ,
+                            'User Id'=> $user->id ,
                             ],
                     ];
                 } 

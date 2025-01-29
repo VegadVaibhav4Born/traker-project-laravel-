@@ -8,7 +8,7 @@ use App\Models\project;
 use App\Models\User;
 use App\Models\Activity;
 use Carbon\Carbon;
-class user_reportcontroller extends Controller
+class UserReportClientController extends Controller
 {
     public function index(Request $request)
     {
@@ -29,11 +29,11 @@ class user_reportcontroller extends Controller
                     $select_by = $request->input('select_by');
                     $selected_project = $request->input('project', '');
                     $selected_members = $request->input('member', []);
-              
-$activityQuery = Activity::where('member_id', $user_h->id);
+   
+   $project_id = Project::where('email', $user_h->email)->pluck('project_id');
+           
+$activityQuery = Activity::whereIn('project_id', $project_id);
 // $dateRange = '2024-08-04 to 2024-10-11';
-// Apply date range filter
-
 if ($dateRange) {
     $dates = explode(' to ', $dateRange);
     if (count($dates) === 2) {
@@ -50,7 +50,7 @@ if($selected_project)
 {
      $activityQuery->where('project_id',$selectedProjectId);
 }
-$projects = Project::where('email',$user_h->email)->get();
+// $projects = Project::where('email',$user_h->email)->get();
 
 // Fetch activities
 $activities = $activityQuery->get();
@@ -91,44 +91,29 @@ function durationToSeconds($duration)
 //     });
 // })->toArray();
 $dateGroups = [];
-
-
  $start = Carbon::parse($startDate);
     $end = Carbon::parse($endDate);
 
-if ($dateRange) {
-    // Calculate the total days in the date range
-    $totalDays = $end->diffInDays($start);
-    $dateGroups = [];
 
-    // Case 1: If the range is 15 days or less, group by single day
-    if ($totalDays <= 15) {
+if ($dateRange) {
+   $totalDays = $end->diffInDays($start);
+
+    // If the range is more than 60 days, group by month
+    if ($totalDays > 70) {
         while ($start->lessThanOrEqualTo($end)) {
-            $dateGroups[] = [
-                'start' => $start->startOfDay(),
-                'end' => $start->endOfDay(),
-                'label' => $start->format('d M')
-            ];
-            $start = $start->copy()->addDay();
-        }
-    }
-    // Case 2: If the range is more than 15 days but within a month, group by 5-day intervals
-    elseif ($totalDays <= 30 && $totalDays <= 90) {
-        while ($start->lessThanOrEqualTo($end)) {
-            $groupEnd = $start->copy()->addDays(4);
+            $groupEnd = $start->copy()->endOfMonth();
             if ($groupEnd->greaterThan($end)) {
                 $groupEnd = $end;
             }
             $dateGroups[] = [
                 'start' => $start->startOfDay(),
                 'end' => $groupEnd->endOfDay(),
-                'label' => $start->format('d M') . ' - ' . $groupEnd->format('d M')
+                'label' => $start->format('M d') . ' - ' . $groupEnd->format('M d')
             ];
             $start = $groupEnd->copy()->addDay();
         }
-    }
-    // Case 3: If the range is more than 30 days but less than 3 months, group by 7-day intervals
-    elseif ($totalDays <= 90) {
+    } else {
+        // Group by week if the date range is 60 days or less
         while ($start->lessThanOrEqualTo($end)) {
             $groupEnd = $start->copy()->addDays(6);
             if ($groupEnd->greaterThan($end)) {
@@ -142,23 +127,7 @@ if ($dateRange) {
             $start = $groupEnd->copy()->addDay();
         }
     }
-    // Case 4: If the range is more than 3 months, group by month
-    else {
-        while ($start->lessThanOrEqualTo($end)) {
-            $groupEnd = $start->copy()->endOfMonth();
-            if ($groupEnd->greaterThan($end)) {
-                $groupEnd = $end;
-            }
-            $dateGroups[] = [
-                'start' => $start->startOfDay(),
-                'end' => $groupEnd->endOfDay(),
-                'label' => $start->format('d M') . ' - ' . $groupEnd->format('d M')
-            ];
-            $start = $groupEnd->copy()->addDay();
-        }
-    }
 }
-
 else {
     
     // Group by day if the range is 7 days or less
@@ -172,7 +141,6 @@ else {
         $start = $start->copy()->addDay();
     }
 }
-
 
 // Group activities by custom date groups and calculate durations
 $durationsByDate = collect($dateGroups)->mapWithKeys(function ($dateGroup) use ($activities, $projectIds) {
@@ -215,24 +183,76 @@ foreach ($chartData['projects'] as $projectId) {
 
 // Prepare project details for tooltips
 $chartData['projectDetails'] = $durationsByDate;
+// Fetch activities for members
+
+//chart 2 start
+// Group activities by member and date
+// $activitiesByMember = $activities->groupBy('member_id')->map(function ($memberGroup) use ($projectIds) {
+//     return $memberGroup->groupBy(function ($activity) {
+//         return Carbon::parse($activity->start_time)->toDateString(); // Group by date
+//     })->map(function ($dateGroup) {
+//         return $dateGroup->sum(function ($activity) {
+//             return durationToSeconds($activity->durations);
+//         });
+//     });
+// })->toArray();
+$activitiesByMember = $activities->groupBy('member_id')->map(function ($memberGroup) use ($dateGroups) {
+    return collect($dateGroups)->mapWithKeys(function ($dateGroup) use ($memberGroup) {
+        $groupedActivities = $memberGroup->filter(function ($activity) use ($dateGroup) {
+            $activityDate = Carbon::parse($activity->start_time);
+            return $activityDate->between($dateGroup['start'], $dateGroup['end']);
+        });
+
+        $totalDuration = $groupedActivities->sum(function ($activity) {
+            return durationToSeconds($activity->durations);
+        });
+
+        return [$dateGroup['label'] => $totalDuration];
+    })->toArray();
+})->toArray();
+// Prepare chart2 data
+$chart2Data = [
+    'dates' => $chartData['dates'], // Dates for the x-axis
+    'members' => $activities->pluck('member_id')->unique()->toArray(), // Member IDs
+    'series' => [], // Series to hold data
+    'memberDetails' => [] // Member details for tooltip
+];
+
+// Create series for each member
+foreach ($chart2Data['members'] as $memberId) {
+    $member = User::where('id', $memberId)->first();
+    $memberName = $member->name;
+    
+    $memberSeries = [];
+    foreach ($chart2Data['dates'] as $date) {
+        $memberSeries[] = isset($activitiesByMember[$memberId][$date]) ? $activitiesByMember[$memberId][$date] : 0;
+    }
+    $chart2Data['series'][] = [
+        'name' => $memberName, // Series name
+        'data' => $memberSeries // Durations for this member
+    ];
+}
+
+// Prepare member details for tooltips
+$chart2Data['memberDetails'] = $activitiesByMember;
+
+//chart 2 end
 
 $projects_data = Project::whereIn('project_id', $projectIds)->get();
 
-        // Pass chartData to the view
+        // Pass chartData to the view 
        
-// $projects = Project::whereIn('project_id', $projectIds)->get();
+$projects = Project::whereIn('project_id', $projectIds)->get();
 
 $select_by = $request->input('select_by');
+ function formatDurationInSeconds($totalSeconds) {
+                            $hours = floor($totalSeconds / 3600);
+                            $minutes = floor(($totalSeconds % 3600) / 60);
+                            $seconds = $totalSeconds % 60;
+                            return sprintf('%02d:%02d:%02d', $hours, $minutes, $seconds);
+                        }
 // in this code if date select kare to te date range ma jetli pan memebr id je user ni id hoy teni sathe compare karo ane activity mathi duration count karo ane chart ma niche date ane te date ma ketlu duration che te display karo ane tooltip ma activity mathi te project id ne display
-  function formatDurationInSeconds($seconds) {
-    $hours = floor($seconds / 3600);
-    $minutes = floor(($seconds % 3600) / 60);
-    $seconds = $seconds % 60;
-    return sprintf('%02d:%02d:%02d', $hours, $minutes, $seconds);
-}
-
     switch ($select_by) {
-        
         case 'show_by_project':
                         // $dateRange = '2024-05-10 to 2024-08-03';
 
@@ -282,18 +302,16 @@ $select_by = $request->input('select_by');
                         $dailyDurations = [];
                     
                     // Process activities for detailed data
-                    foreach ($activities as $activity) {
-                        $startTime = new Carbon($activity->start_time);
-                        $endTime = new Carbon($activity->end_time);
+                      foreach ($activities as $activity) {
+                        // $startTime = new Carbon($activity->start_time);
+                        // $endTime = new Carbon($activity->end_time);
                         // $totalSeconds = $startTime->diffInSeconds($endTime);
-                      $durationString = $activity->durations; // Assuming durations is in 'HH:MM:SS' format
-                $project = Project::where('project_id', $activity->project_id)->first();
-                $project_name = $project ? $project->project_name : 'Unknown Project'; // Handle null project
-            
+                        $durationString = $activity->durations; // Assuming durations is in 'HH:MM:SS' format
+ 
                         // // Convert 'HH:MM:SS' to seconds
                         list($hours, $minutes, $seconds) = explode(':', $durationString);
                         $totalSeconds = ($hours * 3600) + ($minutes * 60) + $seconds;
-                    
+
                         $activityDate = Carbon::parse($activity->start_time)->format('d M');
                         $dailyDurations[$activityDate] = ($dailyDurations[$activityDate] ?? 0) + $totalSeconds;
                     
@@ -302,7 +320,7 @@ $select_by = $request->input('select_by');
                         $project_name = $project ? $project->project_name : 'Unknown Project';
                         $member = User::where('id', $activity->member_id)->first();
                         $mem_name = $member ? $member->name : 'Unknown Member';
-                      $id = $activity->id ?? null;
+                     $id = $activity->id ?? null;
 
                         $activity_data[] = [
                             'activity_name' => $activity->title,
@@ -314,71 +332,13 @@ $select_by = $request->input('select_by');
                             'member_name' => $mem_name,
                             'screenshot' => $activity->screenshot, // Assuming you have this field
                             'formatted_duration' => formatDurationInSeconds($totalSeconds),
-                            'id'=>$id,
+                             'id'=>$id,
                             'project_name'=>$project_name,
                         ];
                     }
-                    
-// foreach ($activities as $activity) {
-//     $startTime = new Carbon($activity->start_time);
-//     $endTime = new Carbon($activity->end_time);
-//     // $totalSeconds = $startTime->diffInSeconds($endTime);
-//   $durationString = $activity->durations; // Assuming durations is in 'HH:MM:SS' format
-  
-// // // Convert 'HH:MM:SS' to seconds
-// list($hours, $minutes, $seconds) = explode(':', $durationString);
-// $totalSeconds = ($hours * 3600) + ($minutes * 60) + $seconds;
-//     $activityDate = Carbon::parse($activity->start_time)->format('d M');
-//     $dailyDurations[$activityDate] = ($dailyDurations[$activityDate] ?? 0) + $totalSeconds;
-
-//     // Group activities by date and project
-//     $project = Project::where('project_id', $activity->project_id)->first();
-//     $project_name = $project ? $project->project_name : 'Unknown Project';
-//     $member = User::where('id', $activity->member_id)->first();
-//     $mem_name = $member ? $member->name : 'Unknown Member';
-
-//     // Prepare the array for grouping activities
-//     $key = $activityDate . '_' . $mem_name . '_' . $project_name . '_' . $activity->title;
-
-//     if (!isset($activity_data[$key])) {
-//         $activity_data[$key] = [
-//             'activity_name' => $activity->title,
-//             'start_time' => $activity->start_time,
-//             'end_time' => $activity->end_time,
-//             'project_id' => $project_name,
-//             'member_name' => $mem_name,
-//             'screenshot' => $activity->screenshot, // Assuming you have this field
-//             'formatted_duration' => formatDurationInSeconds($totalSeconds),
-//         ];
-//     } else {
-//         // Check if the new start time is consecutive with the last end time
-//         $lastEndTime = new Carbon($activity_data[$key]['end_time']);
-//         if ($lastEndTime->diffInMinutes($startTime) <= 5) {
-//             // If consecutive, merge the time intervals
-//             $activity_data[$key]['end_time'] = $activity->end_time;
-//             $activity_data[$key]['formatted_duration'] = formatDurationInSeconds(
-//                 Carbon::parse($activity_data[$key]['start_time'])->diffInSeconds($endTime)
-//             );
-//         } else {
-//             // If not consecutive, add a new entry
-//             $activity_data[] = [
-//                 'activity_name' => $activity->title,
-//                 'start_time' => $activity->start_time,
-//                 'end_time' => $activity->end_time,
-//                 'project_id' => $project_name,
-//                 'member_name' => $mem_name,
-//                 'screenshot' => $activity->screenshot, // Assuming you have this field
-//                 'formatted_duration' => formatDurationInSeconds($totalSeconds),
-//             ];
-//         }
-//     }
-// }
-
-// Re-index the array to prevent gaps in keys
-$activity_data = array_values($activity_data);
-
                         // Format total duration
-                      
+                       
+                    
                         // Calculate total durations for each 7-day group
                         $groupDurations = [];
                         foreach ($dateGroups as $dateGroup) {
@@ -409,7 +369,8 @@ $activity_data = array_values($activity_data);
                         foreach ($projectIds as $projectId) {
                             $project = Project::where('project_id', $projectId)->orderBy('id', 'desc')->first();
                             $pname = $project ? $project->project_name : 'Unknown Project';
-                            
+                             $memberIds = is_array($project->member_id) ? $project->member_id : explode(',', $project->member_id);
+
                             $totalSeconds = 0;
                             $dailyDurations = [];
                             
@@ -417,10 +378,14 @@ $activity_data = array_values($activity_data);
                            
                                 $durationmember = 0; // Reset the member duration for each member
                                 
-                                        $activities_m = Activity::where('member_id', $memberId)
-                                            ->where('project_id', $project->project_id)
-                                            ->orderBy('id', 'desc')->get();
-                                
+                                        // $activities_m = Activity::where('member_id', $memberId)
+                                        //     ->where('project_id', $project->project_id)
+                                        //     ->get();
+                                 $activities_m = Activity::where('member_id', $memberId)
+                                ->where('project_id', $projectId)
+                                ->whereBetween('start_time', [$startDate, $endDate])
+                                ->orderBy('id', 'DESC')->get();
+
                                         foreach ($activities_m as $activity) {
                                             list($hours, $minutes, $seconds) = explode(':', $activity->durations);
                                         $durationmember += ($hours * 3600) + ($minutes * 60) + $seconds;
@@ -439,23 +404,22 @@ $activity_data = array_values($activity_data);
                             
                             foreach ($activities as $activity) {
                                 if ($activity->project_id == $projectId) {
-                                    $startTime = new Carbon($activity->start_time);
-                                    $endTime = new Carbon($activity->end_time);
+                                    // $startTime = new Carbon($activity->start_time);
+                                    // $endTime = new Carbon($activity->end_time);
                                     // $totalSeconds += $startTime->diffInSeconds($endTime);
-                            
                             
                                     $durationString = $activity->durations; // Assuming durations is in 'HH:MM:SS' format
 
                                     list($hours, $minutes, $seconds) = explode(':', $durationString);
                                     $durationInSeconds = ($hours * 3600) + ($minutes * 60) + $seconds;
                                     $totalSeconds += $durationInSeconds;
-                                    
+
                                     $activityDate = Carbon::parse($activity->start_time)->format('d M');
                                     if (!isset($dailyDurations[$activityDate])) {
                                         $dailyDurations[$activityDate] = 0;
                                     }
                                     // $dailyDurations[$activityDate] += $startTime->diffInSeconds($endTime);
-                                      $dailyDurations[$activityDate] += $durationInSeconds;
+                                    $dailyDurations[$activityDate] += $durationInSeconds;
                                 }
                             }
                             
@@ -493,9 +457,10 @@ $activity_data = array_values($activity_data);
                     
                     
                     // Return the full view for normal requests
-                    return view('frontend.user-report', [
+                    return view('frontend.UserReport_Client', [
                         'projects' => $projects,
                         'chartData' => $chartData,
+                        'chart2Data' => $chart2Data,
                         'projectDetails' => $projectDetails,
                         'dateRange' => $dateRange,
                         'selected_project' => $selected_project,
@@ -561,19 +526,19 @@ $activity_data = array_values($activity_data);
         $activity_data = [];
         $dailyDurations = [];
           
+ 
+          
                     // Process activities for detailed data
-                      foreach ($activities as $activity) {
-                        $startTime = new Carbon($activity->start_time);
-                        $endTime = new Carbon($activity->end_time);
+                     foreach ($activities as $activity) {
+                        // $startTime = new Carbon($activity->start_time);
+                        // $endTime = new Carbon($activity->end_time);
                         // $totalSeconds = $startTime->diffInSeconds($endTime);
-                      $durationString = $activity->durations; // Assuming durations is in 'HH:MM:SS' format
-                $project = Project::where('project_id', $activity->project_id)->first();
-                $project_name = $project ? $project->project_name : 'Unknown Project'; // Handle null project
-            
+                        $durationString = $activity->durations; // Assuming durations is in 'HH:MM:SS' format
+ 
                         // // Convert 'HH:MM:SS' to seconds
                         list($hours, $minutes, $seconds) = explode(':', $durationString);
                         $totalSeconds = ($hours * 3600) + ($minutes * 60) + $seconds;
-                    
+
                         $activityDate = Carbon::parse($activity->start_time)->format('d M');
                         $dailyDurations[$activityDate] = ($dailyDurations[$activityDate] ?? 0) + $totalSeconds;
                     
@@ -582,7 +547,7 @@ $activity_data = array_values($activity_data);
                         $project_name = $project ? $project->project_name : 'Unknown Project';
                         $member = User::where('id', $activity->member_id)->first();
                         $mem_name = $member ? $member->name : 'Unknown Member';
-                      $id = $activity->id ?? null;
+                     $id = $activity->id ?? null;
 
                         $activity_data[] = [
                             'activity_name' => $activity->title,
@@ -594,14 +559,15 @@ $activity_data = array_values($activity_data);
                             'member_name' => $mem_name,
                             'screenshot' => $activity->screenshot, // Assuming you have this field
                             'formatted_duration' => formatDurationInSeconds($totalSeconds),
-                            'id'=>$id,
+                             'id'=>$id,
                             'project_name'=>$project_name,
                         ];
                     }
     // Calculate project durations by member
     foreach ($projectIds as $projectId) {
         $project = Project::where('project_id', $projectId)->orderBy('id', 'DESC')->first();
-        $memberIds = is_array($user_h->id) ? $user_h->id : [$user_h->id];
+        // $memberIds = is_array($user_h->id) ? $user_h->id : [$user_h->id];
+ $memberIds = is_array($project->member_id) ? $project->member_id : explode(',', $project->member_id);
 
         foreach ($memberIds as $memberId) {
             if (!isset($memberDurations[$memberId])) {
@@ -622,7 +588,7 @@ $activity_data = array_values($activity_data);
                 $endTime = new Carbon($activity->end_time);
                 // $durationInSeconds = $startTime->diffInSeconds($endTime);
 
- $durationInSeconds = 0;
+              $durationInSeconds = 0;
             
                 // Convert duration string to seconds
                 $durationString = $activity->durations; // Assuming durations is in 'HH:MM:SS' format
@@ -683,10 +649,11 @@ $activity_data = array_values($activity_data);
     }
 
     // Return the view with the processed data
-    return view('frontend.user-report', [
+    return view('frontend.UserReport_Client', [
         'projects' => $projects,
         'members' => $memberNames,
         'chartData' => $chartData,
+        'chart2Data' => $chart2Data,
         'membersData' => $membersData,
         'dateRange' => $dateRange,
         'selected_project' => $selected_project,
@@ -701,28 +668,23 @@ $activity_data = array_values($activity_data);
                    'type' => $users_data['type'] ?? [],
     ]);
     break;
-
-
-
-
-
         case 'show_by_activity':
  
             // $dateRange = '2024-05-01 to 2024-08-03';
          // Generate the date ranges
+
 $dates = [];
+$dateRanges = []; // Initialize as empty array
 if ($dateRange) {
     $start = Carbon::parse($startDate);
     $end = Carbon::parse($endDate);
 
     while ($start->lessThanOrEqualTo($end)) {
-        // Adjusted to add 6 days, including the 21st in the range
         $groupEnd = $start->copy()->addDays(6);
         if ($groupEnd->greaterThan($end)) {
             $groupEnd = $end;
         }
         $dateRanges[] = $start->format('M d') . ' - ' . $groupEnd->format('M d');
-        // Move start to the day after the end of the current group
         $start = $groupEnd->copy()->addDay();
     }
 } else {
@@ -739,19 +701,20 @@ if ($dateRange) {
     }
 }
 
-
 $activity_data = [];
-    // Initialize $activity_data as an array
-   // Process activities for detailed data
- foreach ($activities as $activity) {
-                        $startTime = new Carbon($activity->start_time);
-                        $endTime = new Carbon($activity->end_time);
+$dailyDurations = [];
+
+// Process activities for detailed data
+  foreach ($activities as $activity) {
+                        // $startTime = new Carbon($activity->start_time);
+                        // $endTime = new Carbon($activity->end_time);
                         // $totalSeconds = $startTime->diffInSeconds($endTime);
-                      $durationString = $activity->durations; // Assuming durations is in 'HH:MM:SS' format
-                       // // Convert 'HH:MM:SS' to seconds
+                        $durationString = $activity->durations; // Assuming durations is in 'HH:MM:SS' format
+ 
+                        // // Convert 'HH:MM:SS' to seconds
                         list($hours, $minutes, $seconds) = explode(':', $durationString);
                         $totalSeconds = ($hours * 3600) + ($minutes * 60) + $seconds;
-                    
+
                         $activityDate = Carbon::parse($activity->start_time)->format('d M');
                         $dailyDurations[$activityDate] = ($dailyDurations[$activityDate] ?? 0) + $totalSeconds;
                     
@@ -760,7 +723,7 @@ $activity_data = [];
                         $project_name = $project ? $project->project_name : 'Unknown Project';
                         $member = User::where('id', $activity->member_id)->first();
                         $mem_name = $member ? $member->name : 'Unknown Member';
-                      $id = $activity->id ?? null;
+                     $id = $activity->id ?? null;
 
                         $activity_data[] = [
                             'activity_name' => $activity->title,
@@ -772,18 +735,19 @@ $activity_data = [];
                             'member_name' => $mem_name,
                             'screenshot' => $activity->screenshot, // Assuming you have this field
                             'formatted_duration' => formatDurationInSeconds($totalSeconds),
-                            'id'=>$id,
+                             'id'=>$id,
                             'project_name'=>$project_name,
                         ];
                     }
-
-
 // Process activities for detailed data
 $memberDurations = [];
 $projectDetails = [];
 
-foreach ($projects_data as $project) {
-    $memberIds = is_array($user_h->id) ? $user_h->id : [$user_h->id];
+foreach ($projectIds as $projectId) {
+    $project = Project::where('project_id', $projectId)->orderBy('id', 'DESC')->first();
+    if (!$project) continue;
+
+    $memberIds = is_array($project->member_id) ? $project->member_id : explode(',', $project->member_id);
 
     foreach ($memberIds as $memberId) {
         if (!isset($memberDurations[$memberId])) {
@@ -800,9 +764,11 @@ foreach ($projects_data as $project) {
             $activityStartDate = Carbon::parse($activity->start_time);
             $activityEndDate = Carbon::parse($activity->end_time);
             // $durationInSeconds = $activityStartDate->diffInSeconds($activityEndDate);
- $durationString = $activity->durations; // Assuming durations is in 'HH:MM:SS' format
+ 
+                $durationString = $activity->durations; // Assuming durations is in 'HH:MM:SS' format
                 list($hours, $minutes, $seconds) = explode(':', $durationString);
                 $durationInSeconds = ($hours * 3600) + ($minutes * 60) + $seconds;
+
 
             foreach ($dateRanges as $range) {
                 list($rangeStart, $rangeEnd) = explode(' - ', $range);
@@ -876,23 +842,23 @@ foreach ($memberDurations as $memberId => $totalDurations) {
 }
 
 // Return the data to your view
-return view('frontend.user-report', [
+return view('frontend.UserReport_Client', [
     'projects' => $projects,
     'members' => $memberNames,
     'chartData' => $chartData,
+    'chart2Data' => $chart2Data,
     'membersData' => $membersData,
     'dateRange' => $dateRange,
     'selected_project' => $selected_project,
     'selected_members' => $selected_members,
     'select_by' => $select_by,
-    'dates' => $dateRanges,
+    'dates' => $dateRanges, // Corrected variable name
     'activity_data' => $activity_data,
     'user' => $user_h,
     'request_projects' => $users_data['request_projects'] ?? [],
     'projectCount' => $users_data['projectCount'] ?? 0,
     'type' => $users_data['type'] ?? [],
 ]);
-
 
         break;
 
@@ -943,15 +909,16 @@ return view('frontend.user-report', [
 $activity_data = [];
     // Initialize $activity_data as an array
    // Process activities for detailed data
-foreach ($activities as $activity) {
-                        $startTime = new Carbon($activity->start_time);
-                        $endTime = new Carbon($activity->end_time);
+  foreach ($activities as $activity) {
+                        // $startTime = new Carbon($activity->start_time);
+                        // $endTime = new Carbon($activity->end_time);
                         // $totalSeconds = $startTime->diffInSeconds($endTime);
-                      $durationString = $activity->durations; // Assuming durations is in 'HH:MM:SS' format
-                       // // Convert 'HH:MM:SS' to seconds
+                        $durationString = $activity->durations; // Assuming durations is in 'HH:MM:SS' format
+ 
+                        // // Convert 'HH:MM:SS' to seconds
                         list($hours, $minutes, $seconds) = explode(':', $durationString);
                         $totalSeconds = ($hours * 3600) + ($minutes * 60) + $seconds;
-                    
+
                         $activityDate = Carbon::parse($activity->start_time)->format('d M');
                         $dailyDurations[$activityDate] = ($dailyDurations[$activityDate] ?? 0) + $totalSeconds;
                     
@@ -960,7 +927,7 @@ foreach ($activities as $activity) {
                         $project_name = $project ? $project->project_name : 'Unknown Project';
                         $member = User::where('id', $activity->member_id)->first();
                         $mem_name = $member ? $member->name : 'Unknown Member';
-                      $id = $activity->id ?? null;
+                     $id = $activity->id ?? null;
 
                         $activity_data[] = [
                             'activity_name' => $activity->title,
@@ -972,12 +939,11 @@ foreach ($activities as $activity) {
                             'member_name' => $mem_name,
                             'screenshot' => $activity->screenshot, // Assuming you have this field
                             'formatted_duration' => formatDurationInSeconds($totalSeconds),
-                            'id'=>$id,
+                             'id'=>$id,
                             'project_name'=>$project_name,
                         ];
                     }
-    // Format total duration
-
+    
 $dailyDurations =[];
     // Calculate total durations for each 7-day group
     $groupDurations = [];
@@ -1042,18 +1008,23 @@ $dailyDurations =[];
                 $startTime = new Carbon($activity->start_time);
                 $endTime = new Carbon($activity->end_time);
                 // $totalSeconds += $startTime->diffInSeconds($endTime);
-         $durationString = $activity->durations; // Assuming durations is in 'HH:MM:SS' format
+        
+        $durationString = $activity->durations; // Assuming durations is in 'HH:MM:SS' format
         list($hours, $minutes, $seconds) = explode(':', $durationString);
         $durationInSeconds = ($hours * 3600) + ($minutes * 60) + $seconds;
 
         // Add to total seconds
         $totalSeconds += $durationInSeconds;
+        
                 $activityDate = Carbon::parse($activity->start_time)->format('d M');
                 if (!isset($dailyDurations[$activityDate])) {
                     $dailyDurations[$activityDate] = 0;
                 }
                 // $dailyDurations[$activityDate] += $startTime->diffInSeconds($endTime);
-                 $dailyDurations[$activityDate] += $durationInSeconds;
+                // Convert duration string to seconds
+               
+                $dailyDurations[$activityDate] += $durationInSeconds;
+
             }
         }
         
@@ -1091,9 +1062,10 @@ $dailyDurations =[];
 
 
 // Return the full view for normal requests
-return view('frontend.user-report', [
+return view('frontend.UserReport_Client', [
     'projects' => $projects,
     'chartData' => $chartData,
+    'chart2Data' => $chart2Data,
     'projectDetails' => $projectDetails,
     'dateRange' => $dateRange,
     'selected_project' => $selected_project,
@@ -1161,7 +1133,7 @@ return view('frontend.user-report', [
     public function SelectDataRedirect(Request $request)
 {
     
-     return redirect()->route('user-report');
+     return redirect()->route('user-reportClient');
 }
 
      public function getMembers(Request $request)

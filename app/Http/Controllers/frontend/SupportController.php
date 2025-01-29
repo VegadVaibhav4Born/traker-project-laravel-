@@ -24,7 +24,8 @@ class SupportController extends Controller
                     return view('frontend.support'
                     ,['user'=>$user,
                      'request_projects' => $users_data['request_projects'] ?? [],
-                   'projectCount' => $users_data['projectCount'] ?? 0, ]);
+                   'projectCount' => $users_data['projectCount'] ?? 0,
+                   'type' => $users_data['type'] ?? [],]);
             }
             return redirect()->route('otp-verify')->with('error', 'Please First OTP verify.');
         }
